@@ -1,0 +1,144 @@
+import tkinter as tk
+from tkinter import filedialog, Text
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+from sklearn import svm
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+from keras.utils import to_categorical
+from keras.layers import MaxPooling2D
+from keras.layers import Dense, Flatten
+from keras.layers import Convolution2D
+from keras.models import Sequential
+class PneumoniaDetectionApp(tk.Tk):
+    def _init_(self):
+        super()._init_()
+        self.title("CNN Model For Pneumonia Detection From Chest X-Ray Images")
+        self.geometry("1300x1200")
+        self.svm_acc = None
+        self.cnn_acc = None
+        self.X_train, self.X_test, self.y_train, self.y_test = None, None, None, None
+        self.classifier = None
+        self.pca = None
+        self.create_widgets()
+   def create_widgets(self):
+        font = ('times', 14, 'bold')
+        title = tk.Label(self, text='CNN Model For Pneumonia Detection From Chest X-Ray Images')
+        title.config(bg='deep sky blue', fg='white')  
+        title.config(font=font)           
+        title.config(height=3, width=120)       
+        title.place(x=0,y=5)
+        font1 = ('times', 12, 'bold')
+        self.text = Text(self, height=20, width=150)
+        self.scroll = tk.Scrollbar(self, command=self.text.yview)
+        self.text.configure(yscrollcommand=self.scroll.set)
+        self.text.place(x=50, y=120)
+        self.text.config(font=font1)
+
+        uploadButton = tk.Button(self, text="Upload X-Ray Dataset", command=self.upload_dataset)
+        uploadButton.place(x=50, y=550)
+        uploadButton.config(font=font1) 
+        readButton = tk.Button(self, text="Read & Split Dataset to Train & Test", command=self.split_dataset)
+        readButton.place(x=350, y=550)
+        readButton.config(font=font1) 
+
+        svmButton = tk.Button(self, text="Execute SVM Accuracy Algorithms", command=self.execute_svm)
+        svmButton.place(x=50, y=600)
+        svmButton.config(font=font1) 
+        cnnButton = tk.Button(self, text="Execute CNN Accuracy Algorithm", command=self.execute_cnn)
+        cnnButton.place(x=350, y=600)
+        cnnButton.config(font=font1) 
+
+        predictButton = tk.Button(self, text="Predict Pneumonia", command=self.predict_cancer)
+        predictButton.place(x=50, y=650)
+        predictButton.config(font=font1)
+
+        graphButton = tk.Button(self, text="Accuracy Graph", command=self.graph)
+        graphButton.place(x=350, y=650)
+        graphButton.config(font=font1) 
+
+    def upload_dataset(self):
+        self.filename = filedialog.askdirectory(initialdir=".")
+        self.text.delete('1.0', tk.END)
+        self.text.insert(tk.END, self.filename + " loaded\n")
+        
+    def split_dataset(self):
+        self.text.delete('1.0', tk.END)
+        X = np.load('features/X.txt.npy')
+        Y = np.load('features/Y.txt.npy')
+        print(len(str(Y)))
+         X = np.reshape(X, (X.shape[0], (X.shape[1]*X.shape[2]*X.shape[3])))
+
+        self.pca = PCA(n_components=100)
+        X = self.pca.fit_transform(X)
+        print(len(str(X)))
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(X, Y, test_size=0.2)
+        self.text.insert(tk.END, "Total CT Scan Images Found in dataset : " + str(len(X)) + "\n")
+        self.text.insert(tk.END, "Train split dataset to 80% : " + str(len(self.X_train)) + "\n")
+        self.text.insert(tk.END, "Test split dataset to 20%  : " + str(len(self.X_test)) + "\n")
+
+    def execute_svm(self):
+        self.text.delete('1.0', tk.END)
+        cls = svm.SVC() 
+         cls.fit(self.X_train, self.y_train)
+        predict = cls.predict(self.X_test)
+        self.svm_acc = accuracy_score(self.y_test, predict) * 100
+        self.classifier = cls
+        self.text.insert(tk.END, "SVM Accuracy : " + str(self.svm_acc) + "\n")
+
+    def execute_cnn(self):
+        X = np.load('features/X.txt.npy')
+        Y = np.load('features/Y.txt.npy')
+        Y = to_categorical(Y)
+        self.classifier = Sequential()
+        self.classifier.add(Convolution2D(32, 3, 3, input_shape=(64, 64, 3), activation='relu'))
+        self.classifier.add(MaxPooling2D(pool_size=(2, 2)))
+        self.classifier.add(Convolution2D(32, 3, 3, activation='relu'))
+        self.classifier.add(MaxPooling2D(pool_size=(2, 2)))
+        self.classifier.add(Flatten())
+        self.classifier.add(Dense(units=256, activation='relu'))
+        self.classifier.add(Dense(units=2, activation='softmax'))
+        print(self.classifier.summary())
+        self.classifier.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+         hist = self.classifier.fit(X, Y, batch_size=16, epochs=12, shuffle=True, verbose=2)
+        hist = hist.history
+        acc = hist['accuracy']
+        self.cnn_acc = acc[9] * 100
+        self.text.insert(tk.END, "CNN Accuracy : " + str(self.cnn_acc) + "\n")
+
+    def predict_cancer(self):
+        filename = filedialog.askopenfilename(initialdir="testSamples")
+        img = cv2.imread(filename)
+        img = cv2.resize(img, (64, 64))  # Resize without flattening
+        im2arr = np.array(img)
+        im2arr = im2arr.astype('float32')
+        im2arr = im2arr / 255
+         test = []
+        test.append(im2arr)
+        test = np.asarray(test)
+        predict = self.classifier.predict(test)
+        predicted_class = np.argmax(predict)  # Extract the predicted class label
+        msg = "Uploaded CT Scan is Normal" if predicted_class == 0 else "Uploaded CT Scan is Pneumonia"
+        img = cv2.imread(filename)
+        img = cv2.resize(img, (400, 400))
+        cv2.putText(img, msg, (10, 25),  cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.imshow(msg, img)
+        cv2.waitKey(0)
+    def graph(self):
+        if self.svm_acc is not None and self.cnn_acc is not None:
+            height = [self.svm_acc, self.cnn_acc]
+            bars = ('SVM Accuracy', 'CNN Accuracy')
+            y_pos = np.arange(len(bars))
+            plt.bar(y_pos, height)
+            plt.xticks(y_pos, bars)
+            plt.show()
+         else:
+            self.text.insert(tk.END, "Please execute SVM and CNN algorithms first.\n")
+
+if _name_ == "_main_":
+    app = PneumoniaDetectionApp()
+    app.mainloop()
+
+
